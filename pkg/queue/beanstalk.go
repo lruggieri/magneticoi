@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"encoding/json"
 	"errors"
 	"github.com/beanstalkd/go-beanstalk"
 	"github.com/lruggieri/magneticoi/pkg/util"
@@ -9,16 +10,18 @@ import (
 )
 
 type Beanstalk struct{
-	c *beanstalk.Conn
+	connection    *beanstalk.Conn
 	magneticoTube *beanstalk.TubeSet
-	q chan Message
+	queueChannel  chan Message //receive messages from queue
+	dbChannel chan SimpleTorrentSummary //send messages to the database
 }
-func (btk *Beanstalk) Read () (oMessage chan Message, oError error){
+func (btk *Beanstalk) Read (iDbChannel chan SimpleTorrentSummary) (oMessage chan Message, oError error){
 	c, err := beanstalk.Dial("tcp", "127.0.0.1:11300")
 	if err != nil{
 		return nil, err
 	}
-	btk.c = c
+	btk.connection = c
+	btk.dbChannel = iDbChannel
 
 	availableTubes,err := c.ListTubes()
 	if err != nil{
@@ -35,19 +38,31 @@ func (btk *Beanstalk) Read () (oMessage chan Message, oError error){
 	if !tubeFound{return nil, errors.New("tube for magnetico not found")}
 
 	go btk.fetch()
-	return btk.q,nil
+	return btk.queueChannel,nil
 }
 
 func (btk *Beanstalk) fetch(){
 	util.Logger.Info("Fetch loop started")
 	defer func() {util.Logger.Error("Fetch loop returned")}()
 	for{
-		id, body, err := btk.magneticoTube.Reserve(5 * time.Second)
+		_, body, err := btk.magneticoTube.Reserve(5 * time.Second)
 		if err != nil{
 			if err == beanstalk.ErrTimeout{continue}
-			btk.q <- Message{
+			btk.queueChannel <- Message{
 				Error:err,
 			}
+			continue
 		}
+		var simpleTorrentSummary SimpleTorrentSummary
+		err = json.Unmarshal(body, &simpleTorrentSummary)
+		if err != nil{
+			btk.queueChannel <- Message{
+				Error:err,
+			}
+			continue
+		}
+		btk.dbChannel <- simpleTorrentSummary
+
+		//TODO what do we do with the ID from the beanstalk? We should delete it from the queue
 	}
 }

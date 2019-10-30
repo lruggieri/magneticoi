@@ -15,7 +15,7 @@
       "analyzer": {
         "edge_ngram_analyzer": {
           "type": "custom",
-          "tokenizer": "standard",
+          "tokenizer": "punctuation",
           "filter": [
             "lowercase",
             "edge_ngram_filter"
@@ -23,7 +23,7 @@
         },
         "lower_stop": {
           "type":"custom",
-          "tokenizer":"standard",
+          "tokenizer":"punctuation",
           "filter":[
             "lowercase",
             "english_stop"
@@ -35,6 +35,12 @@
           "filter":[
             "lowercase"
           ]
+        }
+      },
+      "tokenizer": {
+        "punctuation": {
+          "type": "pattern",
+          "pattern": "[ .,!?]"
         }
       },
       "normalizer": {
@@ -49,7 +55,32 @@
   },
   "mappings": {
     "properties": {
-
+      "infohash": {
+        "type": "keyword"
+      },
+      "name": {
+        "type": "text",
+        "analyzer": "lower_stop",
+        "fields": {
+          "raw": {
+            "type": "keyword"
+          },
+          "suggest": {
+            "type": "text",
+            "analyzer": "edge_ngram_analyzer",
+            "search_analyzer": "standard"
+          }
+        }
+      },
+      "files": {
+        "type": "text",
+        "analyzer": "lower_stop",
+        "fields": {
+          "raw": {
+            "type": "keyword"
+          }
+        }
+      }
     }
   }
 }
