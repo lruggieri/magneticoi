@@ -9,19 +9,23 @@ import (
 	"time"
 )
 
-type Beanstalk struct{
+func NewBeanstalkQueue() (oQueue *beanstalkQueue){
+	return &beanstalkQueue{
+		queueChannel:make(chan Message),
+	}
+}
+
+type beanstalkQueue struct{
 	connection    *beanstalk.Conn
 	magneticoTube *beanstalk.TubeSet
 	queueChannel  chan Message //receive messages from queue
-	dbChannel chan SimpleTorrentSummary //send messages to the database
 }
-func (btk *Beanstalk) Read (iDbChannel chan SimpleTorrentSummary) (oMessage chan Message, oError error){
+func (btk *beanstalkQueue) Read () (oMessage chan Message, oError error){
 	c, err := beanstalk.Dial("tcp", "127.0.0.1:11300")
 	if err != nil{
 		return nil, err
 	}
 	btk.connection = c
-	btk.dbChannel = iDbChannel
 
 	availableTubes,err := c.ListTubes()
 	if err != nil{
@@ -41,11 +45,11 @@ func (btk *Beanstalk) Read (iDbChannel chan SimpleTorrentSummary) (oMessage chan
 	return btk.queueChannel,nil
 }
 
-func (btk *Beanstalk) fetch(){
-	util.Logger.Info("Fetch loop started")
-	defer func() {util.Logger.Error("Fetch loop returned")}()
+func (btk *beanstalkQueue) fetch(){
+	util.Logger.Info("Beanstalk fetch loop started")
+	defer func() {util.Logger.Error("Beanstalk fetch loop returned")}()
 	for{
-		_, body, err := btk.magneticoTube.Reserve(5 * time.Second)
+		beanId, body, err := btk.magneticoTube.Reserve(10 * time.Second)
 		if err != nil{
 			if err == beanstalk.ErrTimeout{continue}
 			btk.queueChannel <- Message{
@@ -53,16 +57,24 @@ func (btk *Beanstalk) fetch(){
 			}
 			continue
 		}
-		var simpleTorrentSummary SimpleTorrentSummary
-		err = json.Unmarshal(body, &simpleTorrentSummary)
+		var torrentSummary ExpandedTorrentSummary
+		err = json.Unmarshal(body, &torrentSummary)
 		if err != nil{
 			btk.queueChannel <- Message{
 				Error:err,
 			}
 			continue
 		}
-		btk.dbChannel <- simpleTorrentSummary
-
-		//TODO what do we do with the ID from the beanstalk? We should delete it from the queue
+		util.Logger.Debug("sending message")
+		btk.queueChannel <- Message{
+			Body:torrentSummary,
+		}
+		err = btk.connection.Delete(beanId)
+		if err != nil{
+			btk.queueChannel <- Message{
+				Error:err,
+			}
+			continue
+		}
 	}
 }

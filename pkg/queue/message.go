@@ -10,3 +10,14 @@ type SimpleTorrentSummary struct {
 	Name     string `json:"name"`
 	Files    []File `json:"files"`
 }
+func (sts *SimpleTorrentSummary) GetTotalSize() (oTotalSize uint64){
+	for _, file := range sts.Files {
+		oTotalSize += uint64(file.Size)
+	}
+	return
+}
+type ExpandedTorrentSummary struct{
+	*SimpleTorrentSummary
+	TotalSize uint64 `json:"totalSize"`
+	LastDiscovered int64 `json:"lastDiscovered"`
+}

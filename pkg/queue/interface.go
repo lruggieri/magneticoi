@@ -2,7 +2,7 @@ package queue
 
 type Message struct{
 	Error error
-	Body SimpleTorrentSummary
+	Body ExpandedTorrentSummary
 }
 
 type Queue interface{

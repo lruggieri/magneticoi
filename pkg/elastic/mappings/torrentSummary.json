@@ -40,7 +40,7 @@
       "tokenizer": {
         "punctuation": {
           "type": "pattern",
-          "pattern": "[ .,!?]"
+          "pattern": "[ .,!?_\\[\\]_]"
         }
       },
       "normalizer": {
@@ -55,7 +55,7 @@
   },
   "mappings": {
     "properties": {
-      "infohash": {
+      "infoHash": {
         "type": "keyword"
       },
       "name": {
@@ -73,13 +73,21 @@
         }
       },
       "files": {
-        "type": "text",
-        "analyzer": "lower_stop",
-        "fields": {
-          "raw": {
+        "properties": {
+          "size": {
+            "type": "long"
+          },
+          "path": {
             "type": "keyword"
           }
         }
+      },
+      "totalSize": {
+        "type": "long"
+      },
+      "lastDiscovered": {
+        "type": "date",
+        "format": "epoch_second"
       }
     }
   }

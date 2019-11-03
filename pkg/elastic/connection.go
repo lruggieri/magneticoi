@@ -3,6 +3,7 @@ package elastic
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/lruggieri/magneticoi/pkg/queue"
 	"github.com/lruggieri/magneticoi/pkg/util"
 	"github.com/olivere/elastic/v7"
@@ -14,25 +15,26 @@ import (
 )
 
 type Connection struct {
-	connection *elastic.Client
+	Connection *elastic.Client
 }
 
 const(
 	bulkSize          = 1000
-	IndexNameResource = "resource"
+	IndexNameTorrents = "torrents"
+	InsertionTickTime = 5 * time.Second
 )
 
 
 type indexBlocks struct{
 	templatePath []string
-	insertionFunction func(iElasticClient *elastic.Client, iIndexName string, iDbChannel chan queue.SimpleTorrentSummary) (oErr error)
+	insertionFunction func(iElasticClient *elastic.Client, iIndexName string, iDbChannel chan queue.ExpandedTorrentSummary) (oErr error)
 }
 
 //maps required index => path to relative mapping (path elements to be joined)
 var requiredIndices = map[string]indexBlocks{
-	IndexNameResource: {
-		templatePath:      []string{util.GetCallerPaths(1)[0],"mappings", "simpleTorrentSummary.json"},
-		insertionFunction: insertTorrentSummary,
+	IndexNameTorrents: {
+		templatePath:      []string{util.GetCallerPaths(1)[0],"mappings", "torrentSummary.json"},
+		insertionFunction: InsertTorrentSummary,
 	},
 }
 
@@ -71,46 +73,71 @@ func checkEsDB(iElasticClient *elastic.Client)(oError error){
 	return nil
 }
 
-func insertTorrentSummary(iElasticClient *elastic.Client, iIndexName string, iDbChannel chan queue.SimpleTorrentSummary) (oErr error){
+func InsertTorrentSummary(iElasticClient *elastic.Client, iIndexName string, iDbChannel chan queue.ExpandedTorrentSummary) (oErr error){
 	bulkRequest := iElasticClient.Bulk()
 	currentBulkElements := 0
-	totalInsertion := 0
 
-	commitBulk := func (bulkRequest *elastic.BulkService, bulkElements *int, totalInsertion *int) (oErr error){
-		bulkResponse, err := bulkRequest.Do(context.Background())
-		if err != nil{
-			return err
+	var lastInsertionTime = time.Now()
+	commitBulk := func (bulkRequest *elastic.BulkService, bulkElements *int) (oErr error){
+		defer func(){
+			lastInsertionTime = time.Now()
+		}()
+
+		if *bulkElements > 0{
+			bulkResponse, err := bulkRequest.Do(context.Background())
+			if err != nil{
+				return err
+			}
+
+			if bulkResponse.Errors{
+				util.Logger.Error("errors during bulk. Failed elements: ",len(bulkResponse.Failed()))
+				for _,fe := range bulkResponse.Failed(){
+					fmt.Println("\t"+fe.Error.Reason)
+				}
+			}
+
+			succeeded := bulkResponse.Succeeded()
+			indexed := bulkResponse.Indexed()
+			updated := bulkResponse.Updated()
+			created := bulkResponse.Created()
+			failed := bulkResponse.Failed()
+
+			util.Logger.Info("processed "+strconv.Itoa(*bulkElements)+" elements")
+
+			util.Logger.Info(
+				"\tsucceeded:" + strconv.Itoa(len(succeeded)) +
+					"\n\tindexed:" + strconv.Itoa(len(indexed)) +
+					"\n\tupdated:" + strconv.Itoa(len(updated)) +
+					"\n\tcreated:" + strconv.Itoa(len(created)) +
+					"\n\tfailed:" + strconv.Itoa(len(failed)),
+			)
+
+			bulkRequest.Reset()
+			*bulkElements = 0
 		}
-
-		indexed := bulkResponse.Indexed()
-		if len(indexed) != *bulkElements{
-			return errors.New("tried to index "+strconv.Itoa(*bulkElements)+" but " +
-				"successfully indexed "+strconv.Itoa(len(indexed)))
-		}
-
-		*totalInsertion += *bulkElements
-		util.Logger.Info("inserted:" + strconv.Itoa(*totalInsertion) + " resources")
-
-		bulkRequest.Reset()
-		*bulkElements = 0
 
 		return nil
 	}
 
+	//inserting elements either every 5 seconds or when bulkSize elements are queued
 	for{
 		select{
-		case <- time.Tick(5 * time.Second):{
-			err := commitBulk(bulkRequest,&currentBulkElements, &totalInsertion)
-			if err != nil{
-				return err
+		case <- time.Tick(InsertionTickTime):{
+			if currentBulkElements > 0{
+				err := commitBulk(bulkRequest,&currentBulkElements)
+				if err != nil{
+					return err
+				}
+			}else{
+				util.Logger.Warn("no torrents to insert")
 			}
 		}
 		case tSummary := <- iDbChannel:{
-			bulkRequest.Add(elastic.NewBulkIndexRequest().Index(iIndexName).Id(tSummary.InfoHash).Doc(tSummary))
+			bulkRequest.Add(elastic.NewBulkUpdateRequest().Index(iIndexName).Id(tSummary.InfoHash).Doc(tSummary).DocAsUpsert(true))
 			currentBulkElements++
 
-			if currentBulkElements > 0 && currentBulkElements % bulkSize == 0{
-				err := commitBulk(bulkRequest,&currentBulkElements, &totalInsertion)
+			if time.Now().Sub(lastInsertionTime) > InsertionTickTime || (currentBulkElements > 0 && currentBulkElements % bulkSize == 0){
+				err := commitBulk(bulkRequest,&currentBulkElements)
 				if err != nil{
 					return err
 				}
@@ -118,4 +145,22 @@ func insertTorrentSummary(iElasticClient *elastic.Client, iIndexName string, iDb
 		}
 		}
 	}
+}
+
+func New(iHost, iPort string) (oElasticDB *Connection, oErr error){
+	esUrl := iHost
+	if len(iPort) > 0 {
+		esUrl += ":" + iPort
+	}
+	es, err := elastic.NewClient(elastic.SetSniff(false),elastic.SetURL(esUrl))
+	if err != nil{
+		return nil, err
+	}
+
+	err = checkEsDB(es)
+	if err != nil{
+		return nil, err
+	}
+
+	return &Connection{Connection: es}, nil
 }

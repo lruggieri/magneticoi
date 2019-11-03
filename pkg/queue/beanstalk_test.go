@@ -6,9 +6,9 @@ import (
 )
 
 func TestBeanstalk_Read(t *testing.T) {
-	bean := Beanstalk{}
+	bean := NewBeanstalkQueue()
 
-	q, err := bean.Read(nil)
+	q, err := bean.Read()
 	if err != nil{
 		t.Error(err)
 		t.FailNow()

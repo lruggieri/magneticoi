@@ -1,1 +1,1 @@
-Implements Elasticsearch DB functionality for [magnetico](https://github.com/boramalper/magnetico).
+Implements Elasticsearch functionality for [magnetico](https://github.com/boramalper/magnetico).
