@@ -20,4 +20,5 @@ type ExpandedTorrentSummary struct{
 	*SimpleTorrentSummary
 	TotalSize uint64 `json:"totalSize"`
 	LastDiscovered int64 `json:"lastDiscovered"`
+	TotalPeers int `json:"totalPeers"`
 }
