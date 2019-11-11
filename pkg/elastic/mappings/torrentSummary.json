@@ -78,7 +78,8 @@
             "type": "long"
           },
           "path": {
-            "type": "keyword"
+            "type": "text",
+            "analyzer": "lower_stop"
           }
         }
       },
